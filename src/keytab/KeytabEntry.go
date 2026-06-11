@@ -18,6 +18,10 @@ type KeytabEntry struct {
 	Vno8          uint8
 	Key           KeyBlock
 	Vno           uint32
+	// HasVno indicates whether the optional 32-bit key version number (Vno)
+	// extension is present in this entry. It controls whether Vno is serialized
+	// by ToBytes, so that entries read without the extension round-trip unchanged.
+	HasVno bool
 	// Internal
 	RawBytes     []byte
 	RawBytesSize uint32
@@ -81,12 +85,17 @@ func (k *KeytabEntry) FromBytes(data []byte) error {
 	k.RawBytesSize += k.Key.RawBytesSize
 
 	// Vno
+	// The 32-bit key version number is an optional extension: it is present only
+	// when at least 4 bytes remain in the entry record. When present it supersedes
+	// the 8-bit Vno8 value.
 	if len(data) >= 4 {
 		k.Vno = binary.BigEndian.Uint32(data[0:4])
+		k.HasVno = true
 		k.RawBytesSize += 4
 		// data = data[4:]
 	} else {
 		k.Vno = 0
+		k.HasVno = false
 	}
 
 	k.RawBytes = k.RawBytes[:k.RawBytesSize]
@@ -143,9 +152,12 @@ func (k *KeytabEntry) ToBytes() ([]byte, error) {
 	}
 	data = append(data, keyBytes...)
 
-	// Add the vno
-	binary.BigEndian.PutUint32(buffer4, k.Vno)
-	data = append(data, buffer4...)
+	// Add the vno only when the optional 32-bit key version number extension is
+	// present, so that entries read without it round-trip to the same bytes.
+	if k.HasVno {
+		binary.BigEndian.PutUint32(buffer4, k.Vno)
+		data = append(data, buffer4...)
+	}
 
 	// At the start of the data, add the size of the entry
 	binary.BigEndian.PutUint32(buffer4, uint32(len(data)))
