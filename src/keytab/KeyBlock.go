@@ -29,10 +29,16 @@ type KeyBlock struct {
 // Returns:
 //   - error: An error if the parsing failed.
 func (k *KeyBlock) FromBytes(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("data too short to read key block encryption type: need 2 bytes, have %d", len(data))
+	}
+
 	k.Type = EncryptionType(binary.BigEndian.Uint16(data[0:2]))
 	k.RawBytesSize = 2
 
-	k.Key.FromBytes(data[2:])
+	if err := k.Key.FromBytes(data[2:]); err != nil {
+		return err
+	}
 	k.RawBytesSize += k.Key.RawBytesSize
 
 	return nil

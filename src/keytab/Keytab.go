@@ -34,20 +34,58 @@ func (k *Keytab) FromBytes(data []byte) error {
 	k.RawBytes = data
 	k.RawBytesSize = 0
 
+	if len(data) < 2 {
+		return fmt.Errorf("data too short to read keytab file format version: need 2 bytes, have %d", len(data))
+	}
 	k.FileFormatVersion = binary.BigEndian.Uint16(data[0:2])
-	data = data[2:]
-	k.RawBytesSize += 2
+	offset := uint32(2)
 
 	k.Entries = make([]KeytabEntry, 0)
 
-	for len(data) != 0 {
+	// Following the version, the file is a sequence of records, each prefixed by a
+	// signed 32-bit length. A positive length is a valid entry of that size, a
+	// negative length is a zero-filled hole whose size is the inverse of the length,
+	// and a length of 0 marks the end of the file.
+	for offset < uint32(len(data)) {
+		if uint32(len(data))-offset < 4 {
+			// Not enough bytes left for another record length prefix.
+			break
+		}
+
+		recordLength := int32(binary.BigEndian.Uint32(data[offset : offset+4]))
+
+		if recordLength == 0 {
+			// End-of-file marker.
+			break
+		}
+
+		if recordLength < 0 {
+			// Zero-filled hole: skip the length prefix and the hole itself.
+			holeSize := uint32(-recordLength)
+			if uint32(len(data))-offset-4 < holeSize {
+				return fmt.Errorf("keytab hole at offset %d claims %d bytes but only %d remain", offset, holeSize, uint32(len(data))-offset-4)
+			}
+			offset += 4 + holeSize
+			continue
+		}
+
+		recordSize := 4 + uint32(recordLength)
+		if uint32(len(data))-offset < recordSize {
+			return fmt.Errorf("keytab entry at offset %d claims %d bytes but only %d remain", offset, recordSize, uint32(len(data))-offset)
+		}
+
 		entry := KeytabEntry{}
-		entry.FromBytes(data)
-		data = data[entry.RawBytesSize:]
+		if err := entry.FromBytes(data[offset : offset+recordSize]); err != nil {
+			return err
+		}
 		k.Entries = append(k.Entries, entry)
-		k.RawBytesSize += entry.RawBytesSize
+
+		// Advance by the full record length defined in the file, not by the number
+		// of bytes the entry fields happened to consume.
+		offset += recordSize
 	}
 
+	k.RawBytesSize = offset
 	k.RawBytes = k.RawBytes[:k.RawBytesSize]
 
 	return nil
