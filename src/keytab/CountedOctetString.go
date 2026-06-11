@@ -32,14 +32,20 @@ type CountedOctetString struct {
 // Returns:
 //   - error: An error if the parsing fails.
 func (c *CountedOctetString) FromBytes(data []byte) error {
-	c.RawBytes = data
+	if len(data) < 2 {
+		return fmt.Errorf("data too short to read counted octet string length: need 2 bytes, have %d", len(data))
+	}
 
 	c.Length = binary.BigEndian.Uint16(data[0:2])
-	data = data[2:]
 
-	c.Data = data[:c.Length]
+	if len(data) < 2+int(c.Length) {
+		return fmt.Errorf("data too short to read counted octet string data: need %d bytes, have %d", 2+int(c.Length), len(data))
+	}
+
+	c.Data = data[2 : 2+int(c.Length)]
 
 	c.RawBytesSize = 2 + uint32(c.Length)
+	c.RawBytes = data[:c.RawBytesSize]
 
 	return nil
 }

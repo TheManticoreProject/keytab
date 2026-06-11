@@ -39,48 +39,73 @@ func (k *KeytabEntry) FromBytes(data []byte) error {
 	k.RawBytes = data
 
 	// Size
+	if len(data) < 4 {
+		return fmt.Errorf("data too short to read keytab entry size: need 4 bytes, have %d", len(data))
+	}
 	k.Size = binary.BigEndian.Uint32(data[0:4])
 	data = data[4:]
+	if uint32(len(data)) < k.Size {
+		return fmt.Errorf("keytab entry size %d exceeds available data: have %d bytes", k.Size, len(data))
+	}
 	data = data[:k.Size]
 	k.RawBytesSize += 4
 
 	// NumComponents
+	if len(data) < 2 {
+		return fmt.Errorf("data too short to read number of components: need 2 bytes, have %d", len(data))
+	}
 	k.NumComponents = binary.BigEndian.Uint16(data[0:2])
 	data = data[2:]
 	k.RawBytesSize += 2
 
 	// Realm
 	k.Realm = CountedOctetString{}
-	k.Realm.FromBytes(data)
+	if err := k.Realm.FromBytes(data); err != nil {
+		return err
+	}
 	data = data[k.Realm.RawBytesSize:]
 	k.RawBytesSize += k.Realm.RawBytesSize
 
 	// Components
+	k.Components = make([]CountedOctetString, 0, k.NumComponents)
 	for i := uint16(0); i < k.NumComponents; i++ {
 		component := CountedOctetString{}
-		component.FromBytes(data)
+		if err := component.FromBytes(data); err != nil {
+			return err
+		}
 		k.Components = append(k.Components, component)
 		data = data[component.RawBytesSize:]
 		k.RawBytesSize += component.RawBytesSize
 	}
 
 	// NameType
+	if len(data) < 4 {
+		return fmt.Errorf("data too short to read name type: need 4 bytes, have %d", len(data))
+	}
 	k.NameType = binary.BigEndian.Uint32(data[0:4])
 	data = data[4:]
 	k.RawBytesSize += 4
 
 	// Timestamp
+	if len(data) < 4 {
+		return fmt.Errorf("data too short to read timestamp: need 4 bytes, have %d", len(data))
+	}
 	k.Timestamp = binary.BigEndian.Uint32(data[0:4])
 	data = data[4:]
 	k.RawBytesSize += 4
 
 	// Vno8
+	if len(data) < 1 {
+		return fmt.Errorf("data too short to read vno8: need 1 byte, have %d", len(data))
+	}
 	k.Vno8 = data[0]
 	data = data[1:]
 	k.RawBytesSize += 1
 
 	// Key
-	k.Key.FromBytes(data)
+	if err := k.Key.FromBytes(data); err != nil {
+		return err
+	}
 	data = data[k.Key.RawBytesSize:]
 	k.RawBytesSize += k.Key.RawBytesSize
 
