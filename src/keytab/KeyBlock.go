@@ -28,11 +28,13 @@ type KeyBlock struct {
 //
 // Returns:
 //   - error: An error if the parsing failed.
-func (k *KeyBlock) FromBytes(data []byte) error {
-	k.Type = EncryptionType(binary.BigEndian.Uint16(data[0:2]))
+func (k *KeyBlock) FromBytes(data []byte, order ...binary.ByteOrder) error {
+	bo := resolveByteOrder(order)
+
+	k.Type = EncryptionType(bo.Uint16(data[0:2]))
 	k.RawBytesSize = 2
 
-	k.Key.FromBytes(data[2:])
+	k.Key.FromBytes(data[2:], bo)
 	k.RawBytesSize += k.Key.RawBytesSize
 
 	return nil
@@ -42,14 +44,16 @@ func (k *KeyBlock) FromBytes(data []byte) error {
 //
 // Returns:
 //   - ([]byte, error): The byte array and an error if the conversion failed.
-func (k *KeyBlock) ToBytes() ([]byte, error) {
+func (k *KeyBlock) ToBytes(order ...binary.ByteOrder) ([]byte, error) {
+	bo := resolveByteOrder(order)
+
 	data := make([]byte, 0)
 
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(k.Type))
+	bo.PutUint16(buffer, uint16(k.Type))
 	data = append(data, buffer...)
 
-	keyBytes, err := k.Key.ToBytes()
+	keyBytes, err := k.Key.ToBytes(bo)
 	if err != nil {
 		return nil, err
 	}

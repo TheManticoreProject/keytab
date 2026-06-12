@@ -31,10 +31,12 @@ type CountedOctetString struct {
 //
 // Returns:
 //   - error: An error if the parsing fails.
-func (c *CountedOctetString) FromBytes(data []byte) error {
+func (c *CountedOctetString) FromBytes(data []byte, order ...binary.ByteOrder) error {
+	bo := resolveByteOrder(order)
+
 	c.RawBytes = data
 
-	c.Length = binary.BigEndian.Uint16(data[0:2])
+	c.Length = bo.Uint16(data[0:2])
 	data = data[2:]
 
 	c.Data = data[:c.Length]
@@ -49,7 +51,9 @@ func (c *CountedOctetString) FromBytes(data []byte) error {
 // Returns:
 //   - []byte: The byte array representation of the CountedOctetString.
 //   - error: An error if the conversion fails.
-func (c *CountedOctetString) ToBytes() ([]byte, error) {
+func (c *CountedOctetString) ToBytes(order ...binary.ByteOrder) ([]byte, error) {
+	bo := resolveByteOrder(order)
+
 	if c.Length != uint16(len(c.Data)) {
 		return nil, fmt.Errorf("length of data is not equal to the length of the counted octet string")
 	}
@@ -57,7 +61,7 @@ func (c *CountedOctetString) ToBytes() ([]byte, error) {
 	data := make([]byte, 0)
 
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, c.Length)
+	bo.PutUint16(buffer, c.Length)
 	data = append(data, buffer...)
 
 	data = append(data, c.Data...)

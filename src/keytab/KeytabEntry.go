@@ -1,7 +1,6 @@
 package keytab
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -30,43 +29,57 @@ type KeytabEntry struct {
 //
 // Returns:
 //   - error: An error if the parsing fails.
-func (k *KeytabEntry) FromBytes(data []byte) error {
+func (k *KeytabEntry) FromBytes(data []byte, version ...uint16) error {
+	ver := resolveVersion(version)
+	bo := byteOrderForVersion(ver)
+	v1 := isVersion1(ver)
+
 	k.RawBytesSize = 0
 	k.RawBytes = data
 
 	// Size
-	k.Size = binary.BigEndian.Uint32(data[0:4])
+	k.Size = bo.Uint32(data[0:4])
 	data = data[4:]
 	data = data[:k.Size]
 	k.RawBytesSize += 4
 
 	// NumComponents
-	k.NumComponents = binary.BigEndian.Uint16(data[0:2])
+	numComponents := bo.Uint16(data[0:2])
 	data = data[2:]
 	k.RawBytesSize += 2
+	// In version 1 the on-disk count includes the realm, so subtract 1 to get
+	// the number of name components.
+	if v1 && numComponents > 0 {
+		numComponents--
+	}
+	k.NumComponents = numComponents
 
 	// Realm
 	k.Realm = CountedOctetString{}
-	k.Realm.FromBytes(data)
+	k.Realm.FromBytes(data, bo)
 	data = data[k.Realm.RawBytesSize:]
 	k.RawBytesSize += k.Realm.RawBytesSize
 
 	// Components
 	for i := uint16(0); i < k.NumComponents; i++ {
 		component := CountedOctetString{}
-		component.FromBytes(data)
+		component.FromBytes(data, bo)
 		k.Components = append(k.Components, component)
 		data = data[component.RawBytesSize:]
 		k.RawBytesSize += component.RawBytesSize
 	}
 
-	// NameType
-	k.NameType = binary.BigEndian.Uint32(data[0:4])
-	data = data[4:]
-	k.RawBytesSize += 4
+	// NameType (omitted in version 1, which defaults to the principal name type)
+	if v1 {
+		k.NameType = nameTypePrincipal
+	} else {
+		k.NameType = bo.Uint32(data[0:4])
+		data = data[4:]
+		k.RawBytesSize += 4
+	}
 
 	// Timestamp
-	k.Timestamp = binary.BigEndian.Uint32(data[0:4])
+	k.Timestamp = bo.Uint32(data[0:4])
 	data = data[4:]
 	k.RawBytesSize += 4
 
@@ -76,13 +89,13 @@ func (k *KeytabEntry) FromBytes(data []byte) error {
 	k.RawBytesSize += 1
 
 	// Key
-	k.Key.FromBytes(data)
+	k.Key.FromBytes(data, bo)
 	data = data[k.Key.RawBytesSize:]
 	k.RawBytesSize += k.Key.RawBytesSize
 
 	// Vno
 	if len(data) >= 4 {
-		k.Vno = binary.BigEndian.Uint32(data[0:4])
+		k.Vno = bo.Uint32(data[0:4])
 		k.RawBytesSize += 4
 		// data = data[4:]
 	} else {
@@ -99,18 +112,26 @@ func (k *KeytabEntry) FromBytes(data []byte) error {
 // Returns:
 //   - []byte: The byte array representation of the KeytabEntry.
 //   - error: An error if the conversion fails.
-func (k *KeytabEntry) ToBytes() ([]byte, error) {
+func (k *KeytabEntry) ToBytes(version ...uint16) ([]byte, error) {
+	ver := resolveVersion(version)
+	bo := byteOrderForVersion(ver)
+	v1 := isVersion1(ver)
+
 	data := make([]byte, 0)
 
 	buffer4 := make([]byte, 4)
 	buffer2 := make([]byte, 2)
 
-	// Add the number of components
-	binary.BigEndian.PutUint16(buffer2, k.NumComponents)
+	// Add the number of components. Version 1 includes the realm in the count.
+	numComponents := k.NumComponents
+	if v1 {
+		numComponents++
+	}
+	bo.PutUint16(buffer2, numComponents)
 	data = append(data, buffer2...)
 
 	// Add the realm
-	realmBytes, err := k.Realm.ToBytes()
+	realmBytes, err := k.Realm.ToBytes(bo)
 	if err != nil {
 		return nil, err
 	}
@@ -118,37 +139,39 @@ func (k *KeytabEntry) ToBytes() ([]byte, error) {
 
 	// Add the components
 	for _, component := range k.Components {
-		componentBytes, err := component.ToBytes()
+		componentBytes, err := component.ToBytes(bo)
 		if err != nil {
 			return nil, err
 		}
 		data = append(data, componentBytes...)
 	}
 
-	// Add the name type
-	binary.BigEndian.PutUint32(buffer4, k.NameType)
-	data = append(data, buffer4...)
+	// Add the name type (omitted in version 1)
+	if !v1 {
+		bo.PutUint32(buffer4, k.NameType)
+		data = append(data, buffer4...)
+	}
 
 	// Add the timestamp
-	binary.BigEndian.PutUint32(buffer4, k.Timestamp)
+	bo.PutUint32(buffer4, k.Timestamp)
 	data = append(data, buffer4...)
 
 	// Add the vno8
 	data = append(data, k.Vno8)
 
 	// Add the key
-	keyBytes, err := k.Key.ToBytes()
+	keyBytes, err := k.Key.ToBytes(bo)
 	if err != nil {
 		return nil, err
 	}
 	data = append(data, keyBytes...)
 
 	// Add the vno
-	binary.BigEndian.PutUint32(buffer4, k.Vno)
+	bo.PutUint32(buffer4, k.Vno)
 	data = append(data, buffer4...)
 
 	// At the start of the data, add the size of the entry
-	binary.BigEndian.PutUint32(buffer4, uint32(len(data)))
+	bo.PutUint32(buffer4, uint32(len(data)))
 	data = append(buffer4, data...)
 
 	return data, nil
@@ -158,8 +181,8 @@ func (k *KeytabEntry) ToBytes() ([]byte, error) {
 //
 // Returns:
 //   - error: An error if the update fails.
-func (k *KeytabEntry) UpdateSize() error {
-	bytes, err := k.ToBytes()
+func (k *KeytabEntry) UpdateSize(version ...uint16) error {
+	bytes, err := k.ToBytes(version...)
 	if err != nil {
 		return err
 	}

@@ -42,7 +42,7 @@ func (k *Keytab) FromBytes(data []byte) error {
 
 	for len(data) != 0 {
 		entry := KeytabEntry{}
-		entry.FromBytes(data)
+		entry.FromBytes(data, k.FileFormatVersion)
 		data = data[entry.RawBytesSize:]
 		k.Entries = append(k.Entries, entry)
 		k.RawBytesSize += entry.RawBytesSize
@@ -65,7 +65,7 @@ func (k *Keytab) ToBytes() ([]byte, error) {
 	data = append(data, buffer2...)
 
 	for _, entry := range k.Entries {
-		entryBytes, err := entry.ToBytes()
+		entryBytes, err := entry.ToBytes(k.FileFormatVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -81,7 +81,7 @@ func (k *Keytab) ToBytes() ([]byte, error) {
 //   - error: An error if the update fails.
 func (k *Keytab) UpdateEntriesSizes() error {
 	for i := range k.Entries {
-		err := k.Entries[i].UpdateSize()
+		err := k.Entries[i].UpdateSize(k.FileFormatVersion)
 		if err != nil {
 			return err
 		}
